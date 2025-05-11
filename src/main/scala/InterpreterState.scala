@@ -32,14 +32,14 @@ final case class InterpreterState (
   }
 
   def peek(n: Int): Either[String, Int] = Try {
-    stack._1(n)
+    stack(n)
   } match {
     case Success(value) => Right(value)
-    case Failure(exception) => Left(exception.getMessage() + f"\nwith stack._1($n) in InterpreterState.peek($n)")
+    case Failure(exception) => Left(exception.getMessage() + f"\nwith stack($n) in InterpreterState.peek($n)")
   }
 
   def dropStack(n: Int): Either[String, InterpreterState] = Try {
-    Stack(stack._1.drop(n))
+    stack.drop(n)
   } match {
     case Success(newStack) => Right(copy(stack = newStack))
     case Failure(exception) => Left(exception.getMessage() + f"\nwith Stack(stack._1.drop($n)) in InterpreterState.dropStack($n)")
@@ -90,6 +90,8 @@ final case class InterpreterState (
     copy(output = output + text)
 
   def getOutput: String = output
+
+  def flushOutput: InterpreterState = copy(output = "")
 }
 
 object InterpreterState {

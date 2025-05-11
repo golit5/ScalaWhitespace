@@ -144,14 +144,14 @@ object Interpreter {
     peek.flatMap {
       case Right(0) => jump(label)
       case Right(_) => State.pure(Right(())) 
-      case Left(error) => State.pure(Left(error + f"\nwith state.peek in Interpreter.jz($label)")) 
+      case Left(error) => State.pure(Left(error + f"\nin Interpreter.jz($label)")) 
     }
 
   private def jn(label: String): Interpreter[Either[String, Unit]] = 
     peek.flatMap {
       case Right(value) if value < 0 => jump(label)
       case Right(_) => State.pure(Right(()))
-      case Left(error) => State.pure(Left(error + f"\nwith state.peek in Interpreter.jn($label)")) 
+      case Left(error) => State.pure(Left(error + f"\nin Interpreter.jn($label)")) 
     }
 
   private def getPosition: Interpreter[Int] = State ( state => (state, state.getPosition) )
@@ -171,7 +171,9 @@ object Interpreter {
 
   private def ret: Interpreter[Either[String, Unit]] = ???
 
-  private def progEnd: Interpreter[Either[String, Unit]] = ???
+  private def progEnd: Interpreter[Either[String, Unit]] = State { state =>
+    (state, Left(state.getOutput + "\nProgram has ended!"))
+  }
 
   private def outChar: Interpreter[Either[String, Unit]] = State { state =>
     state.pop match {
@@ -191,9 +193,10 @@ object Interpreter {
 
   private def inNum: Interpreter[Either[String, Unit]] = ???
   
-  def interpret(program: List[Char]): Interpreter[Either[String, Unit]] = {
-    val commands = Parser(program.toList).parse()
-    commands.map( command =>
+  def interpret(program: List[Char]): List[Interpreter[Either[String, Unit]]] = {
+    Parser(program)
+    .parse()
+    .map( command =>
       command match{
         case Command.Push(value)  => push(value)
         case Command.Dup          => duplicate
@@ -221,16 +224,26 @@ object Interpreter {
         case Command.InNum        => inNum
       }
     )
-    .fold(State.pure[InterpreterState, Either[String, Unit]](Right(())))( (stateAccum, stateObject) => 
-      State( state => 
-        val (s1, v1) = stateAccum.run(state) 
-        v1 match {
-          case Right(value) => stateObject.run(s1) 
-          case Left(error)  => (s1, Left(error))
-        }
-      )
-    )
   }
- 
-  
+
+  def runProgram(
+    program: List[Char],
+    initialState: InterpreterState = InterpreterState.initial
+  ): (InterpreterState, String) = {
+    val commands = interpret(program)
+    @annotation.tailrec
+    def loop(
+      state: InterpreterState,
+      stepsLeft: Int = 1000
+    ): (InterpreterState, String) = {
+      if (stepsLeft <= 0) (state, state.getOutput + "\nMaximum execution steps exceeded")
+      else commands(state.getPosition).run(state) match {
+        case (newState, Left(message)) => 
+          (newState, message)
+        case (newState, Right(_)) =>
+          loop(newState.advanceCounter(1), stepsLeft - 1)
+      }
+    }
+    loop(initialState)
+  }
 }

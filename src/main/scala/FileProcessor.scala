@@ -1,7 +1,6 @@
 import scala.io.Source
-import scala.util.{Try, Using}
 
-case class FileConfig(path: String, chunkSize: Int = 1024)
+case class FileConfig(path: String)
 
 type FileIO[A] = Reader[FileConfig, A]
 
@@ -25,14 +24,14 @@ object FileProcessor {
   def processFile: FileIO[LazyList[String]] = 
     for {
       lines <- FileReader.readLines
-      processed = 
-        lines.map(str => 
+      processed = lines
+      .map(str => 
           str.filter(character => character match {
           case '\t' => true
           case '\n' => true
           case ' '  => true
           case _    => false
-        })
+        } )
       )
     } yield processed
 }

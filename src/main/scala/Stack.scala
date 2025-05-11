@@ -6,4 +6,6 @@ case class Stack[A](elements: List[A] = Nil) {
   }
   def peek: Option[A] = elements.headOption
   def isEmpty: Boolean = elements.isEmpty
+  def apply(n: Int): A = elements(n)
+  def drop(n: Int): Stack[A] = Stack(elements.drop(n))
 }
