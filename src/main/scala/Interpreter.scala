@@ -1,62 +1,100 @@
 import State.pure
 import scala.util.{Try, Success, Failure}
-type Interpreter[A] = State[InterpreterState, A]
 
-object Interpreter {
+case class Interpreter[A](run: InterpreterState => (InterpreterState, Either[String, A])):
+
+  def apply(s: InterpreterState): (InterpreterState, Either[String, A]) = 
+    run(s)
+
+  def map[B](f: A => B): Interpreter[B] =
+    Interpreter { s =>
+      val (s1, res) = run(s)
+      res match {
+        case Left(err) => (s1, Left(err))
+        case Right(a)  => (s1, Right(f(a)))
+      }
+    }
+
+  def flatMap[B](f: A => Interpreter[B]): Interpreter[B] =
+    Interpreter { s =>
+      val (s1, res) = run(s)
+      res match {
+        case Left(err) => (s1, Left(err))
+        case Right(a)  => f(a).run(s1)
+      }
+    }
+
+  def withFilter(p: A => Boolean): Interpreter[Option[A]] =
+    Interpreter { s =>
+      val (s1, res) = run(s)
+      res match {
+        case Left(err) => (s1, Left(err))
+        case Right(a)  => 
+          if (p(a)) (s1, Right(Some(a)))
+          else (s1, Right(None)) 
+      }
+    }
+
+
+object Interpreter:
+  def pure[A](a: Either[String, A]): Interpreter[A] = Interpreter(s => (s, a))
+  def success[A](a: A): Interpreter[A] = pure(Right(a))
+  def fail(error: String): Interpreter[Nothing] = pure(Left(error))
   
-  private def getState: Interpreter[InterpreterState] = State ( state => 
-    State.pure[InterpreterState, InterpreterState](state).run(state)
+  private def getState: Interpreter[InterpreterState] = Interpreter ( state => 
+    State.pure(Right(state)).run(state)
   )
 
-  private def push(value: Int): Interpreter[Either[String, Unit]] = State ( state =>
+  private def push(value: Int): Interpreter[Unit] = Interpreter ( state =>
       state.push(value) match {
         case Right(newState)  => (newState, Right(()))
         case Left(error) => (state, Left(error + f"\nwith state.push($value) in Interpreter.push($value)"))
       }
     )
 
-  private def pop: Interpreter[Either[String, Int]] = State ( state =>
+  private def pop: Interpreter[Int] = Interpreter ( state =>
     state.pop match {
       case Right(newState, value) => (newState, Right(value))
-      case Left(error) => (state, Left(error + "\nwith state.pop in Interpreter.pop"))
+      case Left(error) => (state,  Left(error + "\nwith state.pop in Interpreter.pop"))
     }
   )
 
-  private def peek: Interpreter[Either[String, Int]] = State ( state =>
+  private def peek: Interpreter[Int] = Interpreter ( state =>
     state.peek match {
       case Right(value) => (state, Right(value))
       case Left(error) => (state, Left(error + "\nwith state.peek in Interpreter.peek"))
     }
   )
 
-  private def peek(n: Int): Interpreter[Either[String, Int]] = State ( state =>
+  private def peek(n: Int): Interpreter[Int] = Interpreter ( state =>
     state.peek(n) match {
       case Right(value) => (state, Right(value))
       case Left(error) => (state, Left(error + f"\nwith state.peek($n) in Interpreter.peek($n)"))
     }
   )
 
-  private def dropStackWithTop(n: Int): Interpreter[Either[String, Unit]] = State ( state =>
+  private def dropStackWithTop(n: Int): Interpreter[Unit] = Interpreter ( state =>
     state.dropStack(n) match {
       case Right(newState) => (newState, Right(()))
       case Left(error) => (state, Left(error + f"\nwith state.dropStack($n) in Interpreter.dropStack($n)"))
     }
   )
 
-  private def dropStack(n: Int): Interpreter[Either[String, Unit]] = for {
+
+  private def dropStack(n: Int): Interpreter[Unit] = for {
     top <- pop
     _   <- dropStackWithTop(n)
-    _   <- push(top.right.get)
+    _   <- push(top)
   } yield Right(())
   
-  private def updateHeap(address: Int, value: Int): Interpreter[Either[String, Unit]] = State ( state =>
+  private def updateHeap(address: Int, value: Int): Interpreter[Unit] = Interpreter ( state =>
     state.updateHeap(address, value) match {
       case Right(newState) => (newState, Right(()))
       case Left(error) => (state, Left(error + f"\nwith state.updateHeap($address, $value) in Interpreter.updateHeap($address, $value)"))
     }
   )
 
-  private def getFromHeap(address: Int): Interpreter[Either[String, Int]] = State ( state =>
+  private def getFromHeap(address: Int): Interpreter[Int] = Interpreter ( state =>
     state.getFromHeap(address) 
     match {
       case Right(value) => (state, Right(value))
@@ -64,136 +102,134 @@ object Interpreter {
     }
   )
 
-  private def duplicate: Interpreter[Either[String, Unit]] = for {
+  private def duplicate: Interpreter[Unit] = for {
     value <- peek
-    _     <- push(value.right.get)
+    _     <- push(value)
   } yield Right(())
 
-  private def duplicate(n: Int): Interpreter[Either[String, Unit]] = for {
+  private def duplicate(n: Int): Interpreter[Unit] = for {
       value <- peek(n)
-      _     <- push(value.right.get)
-    } yield Right(())
+      _     <- push(value)
+  } yield Right(())
 
-  private def swap: Interpreter[Either[String, Unit]] = for {
+  private def swap: Interpreter[Unit] = for {
     b <- pop
     a <- pop
-    _ <- push(b.right.get)
-    _ <- push(b.right.get)
+    _ <- push(b)
+    _ <- push(b)
   } yield Right(())
 
-  private def discard: Interpreter[Either[String, Unit]] = for {
+  private def discard: Interpreter[Unit] = for {
     _ <- pop
   } yield Right(())
 
-  private def slide(n: Int): Interpreter[Either[String, Unit]] = for {
+  private def slide(n: Int): Interpreter[Unit] = for {
     top <- pop
     _   <- dropStack(n)
-    _   <- push(top.right.get)
+    _   <- push(top)
   } yield Right(())
   
-  private def add: Interpreter[Either[String, Unit]] = for {
+  private def add: Interpreter[Unit] = for {
     b <- pop
     a <- pop
-    _ <- push(a.right.get + b.right.get)
+    _ <- push(a + b)
   } yield Right(())
 
-  private def sub: Interpreter[Either[String, Unit]] = for {
+  private def sub: Interpreter[Unit] = for {
     b <- pop
     a <- pop
-    _ <- push(a.right.get - b.right.get)
+    _ <- push(a - b)
   } yield Right(())
 
-  private def mul: Interpreter[Either[String, Unit]] = for {
+  private def mul: Interpreter[Unit] = for {
     b <- pop
     a <- pop
-    _ <- push(a.right.get * b.right.get)
+    _ <- push(a * b)
   } yield Right(())
 
-  private def div: Interpreter[Either[String, Unit]] = for {
+  private def div: Interpreter[Unit] = for {
     b <- pop
     a <- pop
-    _ <- push(a.right.get / b.right.get)
+    _ <- push(a / b)
   } yield Right(())
 
-  private def mod: Interpreter[Either[String, Unit]] = for {
+  private def mod: Interpreter[Unit] = for {
     b <- pop
     a <- pop
-    _ <- push(a.right.get % b.right.get)
+    _ <- push(a % b)
   } yield Right(())
 
-  private def store: Interpreter[Either[String, Unit]] = for {
+  private def store: Interpreter[Unit] = for {
     address <- pop
     value   <- pop
-    _ <- updateHeap(address.right.get, value.right.get)
+    _ <- updateHeap(address, value)
   } yield Right(())
 
-  private def retrieve: Interpreter[Either[String, Unit]] = for {
+  private def retrieve: Interpreter[Unit] = for {
     address <- pop
-    value   <- getFromHeap(address.right.get)
-    _       <- push(value.right.get)
+    value   <- getFromHeap(address)
+    _       <- push(value)
   } yield Right(())
 
-  private def jump(label: String): Interpreter[Either[String, Unit]] = State ( state =>
+  private def jump(label: String): Interpreter[Unit] = Interpreter ( state =>
     state.jumpTo(label) match {
       case Right(newState) => (newState, Right(()))
       case Left(error) => (state, Left(error + f"\nwith state.jumpTo($label) in Interpreter.jump($label)"))
     }
   )
 
-  private def jz(label: String): Interpreter[Either[String, Unit]] = 
-    peek.flatMap {
-      case Right(0) => jump(label)
-      case Right(_) => State.pure(Right(())) 
-      case Left(error) => State.pure(Left(error + f"\nin Interpreter.jz($label)")) 
-    }
+  private def jz(label: String): Interpreter[Unit] = for {
+    value <- peek
+    if value == 0
+    _ <- jump(label)
+  } yield Right(())
 
-  private def jn(label: String): Interpreter[Either[String, Unit]] = 
-    peek.flatMap {
-      case Right(value) if value < 0 => jump(label)
-      case Right(_) => State.pure(Right(()))
-      case Left(error) => State.pure(Left(error + f"\nin Interpreter.jn($label)")) 
-    }
+  private def jn(label: String): Interpreter[Unit] = for {
+    value <- peek
+    if value < 0
+    _ <- jump(label)
+  } yield Right(())
 
-  private def getPosition: Interpreter[Int] = State ( state => (state, state.getPosition) )
+  private def getPosition: Interpreter[Int] = Interpreter ( state => (state, Right(state.getPosition)) )
 
-  private def mark(label: String): Interpreter[Either[String, Unit]] = State ( state => 
+  private def mark(label: String): Interpreter[Unit] = Interpreter ( state => 
     state.addLabel(label, state.getPosition) match {
       case Right(newState) => (newState, Right(()))
       case Left(error) => (state, Left(error + f"\nwith state.addLabel($label, ${state.getPosition})) in Interpreter.mark($label)"))
     }
   )
 
-  private def call(label: String): Interpreter[Either[String, Unit]] = for {
+  private def call(label: String): Interpreter[Unit] = for {
     position <- getPosition
     _        <- push(position)
     _        <- jump(label)
   } yield Right(())
 
-  private def ret: Interpreter[Either[String, Unit]] = ???
+  private def ret: Interpreter[Unit] = ???
 
-  private def progEnd: Interpreter[Either[String, Unit]] = State { state =>
+  private def progEnd: Interpreter[Unit] = Interpreter { state =>
     (state, Left(state.getOutput + "\nProgram has ended!"))
   }
 
-  private def outChar: Interpreter[Either[String, Unit]] = State { state =>
+  private def outChar: Interpreter[Unit] = Interpreter { state =>
     state.pop match {
       case Right(newState, integer) => (newState.addOutput(integer.toChar.toString()), Right(()))
       case Left(error)   => (state, Left(error + f"\nwith state.pop in Interpreter.outChar"))
     }
   }
 
-  private def outNum: Interpreter[Either[String, Unit]] = State { state =>
+  private def outNum: Interpreter[Unit] = Interpreter { state =>
     state.pop match {
       case Right(newState, integer) => (newState.addOutput(integer.toString()), Right(()))
       case Left(error)   => (state, Left(error + f"\nwith state.pop in Interpreter.outChar"))
     }
   }
 
-  private def inChar: Interpreter[Either[String, Unit]] = ???
+  private def inChar: Interpreter[Unit] = ???
 
-  private def inNum: Interpreter[Either[String, Unit]] = ???
+  private def inNum: Interpreter[Unit] = ???
   
-  def interpret(program: List[Char]): List[Interpreter[Either[String, Unit]]] = {
+  def interpret(program: List[Char]): List[Interpreter[Unit]] = {
     Parser(program)
     .parse()
     .map( command =>
@@ -246,4 +282,4 @@ object Interpreter {
     }
     loop(initialState)
   }
-}
+
